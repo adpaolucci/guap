@@ -492,7 +492,7 @@ impl LocalAdminAgent {
                 && let Some(exe_dir) = exe.parent()
                 && let Some(spec) = discover_bundled_llama_in_dir(exe_dir)
             {
-                let guard = start_ephemeral_bundled_llama(&spec, Duration::from_secs(30))?;
+                let guard = start_ephemeral_bundled_llama(&spec, Duration::from_secs(60))?;
                 active_endpoint = guard.endpoint.clone();
                 initial_probe = probe_local_llama_server(&active_endpoint, Duration::from_secs(2));
                 Some(guard)

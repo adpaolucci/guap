@@ -205,6 +205,8 @@ pub struct CatalogConfig {
     pub call_timeout: Duration,
     /// Pass `--offline` to downstream suites that support deterministic fixture mode.
     pub prefer_suite_offline_flag: bool,
+    /// Prefer `target/release` suite MCP binaries over `target/debug` when both exist.
+    pub prefer_release_binaries: bool,
 }
 
 impl Default for CatalogConfig {
@@ -214,6 +216,7 @@ impl Default for CatalogConfig {
             workspace_root: detect_default_workspace_root(),
             call_timeout: Duration::from_secs(15),
             prefer_suite_offline_flag: false,
+            prefer_release_binaries: cfg!(not(debug_assertions)),
         }
     }
 }
@@ -225,6 +228,7 @@ impl CatalogConfig {
             workspace_root: None,
             call_timeout: Duration::from_secs(5),
             prefer_suite_offline_flag: true,
+            prefer_release_binaries: false,
         }
     }
 }
@@ -684,7 +688,8 @@ impl SuiteCatalog {
                 .unwrap_or(spec.domain)
                 .to_string();
 
-            let launch = locate_suite_mcp_binary(config.workspace_root.as_deref(), spec);
+            let launch =
+                locate_suite_mcp_binary(config.workspace_root.as_deref(), spec, config.prefer_release_binaries);
             let mut discovered_tools: Vec<IndexedTool> = Vec::new();
             let mut availability = SuiteAvailability::Missing;
 
@@ -768,6 +773,11 @@ fn detect_default_workspace_root() -> Option<PathBuf> {
         }
     }
     if let Ok(exe) = env::current_exe() {
+        if let Some(exe_dir) = exe.parent()
+            && exe_dir.join("guap-portable.marker").is_file()
+        {
+            return Some(exe_dir.to_path_buf());
+        }
         for ancestor in exe.ancestors().skip(1) {
             if ancestor.join("guap-kit").is_dir() || ancestor.join("sys2rust").is_dir() {
                 return Some(ancestor.to_path_buf());
@@ -798,7 +808,50 @@ fn file_mtime(path: &Path) -> SystemTime {
         .unwrap_or(SystemTime::UNIX_EPOCH)
 }
 
-fn locate_suite_mcp_binary(workspace_root: Option<&Path>, spec: &SuiteSpec) -> Option<McpLaunchSpec> {
+fn locate_portable_in_dir(
+    base_dir: &Path,
+    spec: &SuiteSpec,
+    bin_file: &str,
+    prefix_args: &[String],
+) -> Option<McpLaunchSpec> {
+    for candidate in [
+        base_dir.join(bin_file),
+        base_dir.join("suites").join(spec.suite_id).join(bin_file),
+        base_dir.join("suites").join(spec.repo_dir).join(bin_file),
+    ] {
+        if candidate.is_file() {
+            return Some(McpLaunchSpec {
+                program: candidate,
+                prefix_args: prefix_args.to_vec(),
+            });
+        }
+    }
+
+    if let Some(py_script) = spec.python_script_fallback {
+        for script_candidate in [
+            base_dir.join("suites").join(spec.suite_id).join(py_script),
+            base_dir.join("suites").join(spec.repo_dir).join(py_script),
+        ] {
+            if script_candidate.is_file()
+                && let Some(py_exe) = find_on_path(if cfg!(windows) { "python.exe" } else { "python3" })
+                    .or_else(|| find_on_path("python"))
+            {
+                return Some(McpLaunchSpec {
+                    program: py_exe,
+                    prefix_args: vec![script_candidate.display().to_string()],
+                });
+            }
+        }
+    }
+
+    None
+}
+
+fn locate_suite_mcp_binary(
+    workspace_root: Option<&Path>,
+    spec: &SuiteSpec,
+    prefer_release: bool,
+) -> Option<McpLaunchSpec> {
     let bin_file = exe_filename(spec.mcp_bin);
     let prefix_args: Vec<String> = spec.mcp_prefix_args.iter().map(|s| (*s).to_string()).collect();
 
@@ -806,48 +859,29 @@ fn locate_suite_mcp_binary(workspace_root: Option<&Path>, spec: &SuiteSpec) -> O
     if let Ok(current_exe) = env::current_exe()
         && let Some(exe_dir) = current_exe.parent()
     {
-        for candidate in [
-            exe_dir.join(&bin_file),
-            exe_dir.join("suites").join(spec.suite_id).join(&bin_file),
-            exe_dir.join("suites").join(spec.repo_dir).join(&bin_file),
-        ] {
-            if candidate.is_file() {
-                return Some(McpLaunchSpec {
-                    program: candidate,
-                    prefix_args,
-                });
-            }
+        if let Some(found) = locate_portable_in_dir(exe_dir, spec, &bin_file, &prefix_args) {
+            return Some(found);
         }
-
-        if let Some(py_script) = spec.python_script_fallback {
-            for script_candidate in [
-                exe_dir.join("suites").join(spec.suite_id).join(py_script),
-                exe_dir.join("suites").join(spec.repo_dir).join(py_script),
-            ] {
-                if script_candidate.is_file()
-                    && let Some(py_exe) = find_on_path(if cfg!(windows) { "python.exe" } else { "python3" })
-                        .or_else(|| find_on_path("python"))
-                {
-                    return Some(McpLaunchSpec {
-                        program: py_exe,
-                        prefix_args: vec![script_candidate.display().to_string()],
-                    });
-                }
-            }
+        if exe_dir.join("guap-portable.marker").is_file() && workspace_root.map(|w| w == exe_dir).unwrap_or(true) {
+            return None;
         }
     }
 
-    // 2. Sibling workspace build outputs (pick newest mtime between debug and release!)
+    // 2. Portable bundle layout under explicit workspace_root, or sibling dev workspace build outputs
     if let Some(root) = workspace_root {
+        if root.join("guap-portable.marker").is_file() {
+            return locate_portable_in_dir(root, spec, &bin_file, &prefix_args);
+        }
+
         let repo_path = root.join(spec.repo_dir);
         let debug_bin = repo_path.join("target").join("debug").join(&bin_file);
         let release_bin = repo_path.join("target").join("release").join(&bin_file);
         let chosen = match (debug_bin.is_file(), release_bin.is_file()) {
             (true, true) => {
-                if file_mtime(&debug_bin) >= file_mtime(&release_bin) {
-                    Some(debug_bin)
-                } else {
+                if prefer_release || file_mtime(&release_bin) > file_mtime(&debug_bin) {
                     Some(release_bin)
+                } else {
+                    Some(debug_bin)
                 }
             }
             (true, false) => Some(debug_bin),
@@ -896,10 +930,24 @@ fn find_on_path(file_name: &str) -> Option<PathBuf> {
 }
 
 fn read_suite_metadata(workspace_root: Option<&Path>, spec: &SuiteSpec) -> Option<Value> {
-    let root = workspace_root?;
-    let meta_path = root.join(spec.repo_dir).join("metadata.json");
-    let raw = fs::read_to_string(meta_path).ok()?;
-    serde_json::from_str::<Value>(&raw).ok()
+    let mut candidates = Vec::new();
+    if let Ok(exe) = env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+    {
+        candidates.push(exe_dir.join("suites").join(spec.suite_id).join("metadata.json"));
+    }
+    if let Some(root) = workspace_root {
+        candidates.push(root.join("suites").join(spec.suite_id).join("metadata.json"));
+        candidates.push(root.join(spec.repo_dir).join("metadata.json"));
+    }
+    for meta_path in candidates {
+        if let Ok(raw) = fs::read_to_string(meta_path)
+            && let Ok(val) = serde_json::from_str::<Value>(&raw)
+        {
+            return Some(val);
+        }
+    }
+    None
 }
 
 fn probe_suite_tools(launch: &McpLaunchSpec) -> Result<Vec<Value>, String> {
@@ -1765,5 +1813,48 @@ mod tests {
         assert_eq!(providers.len(), 2);
         let suites_data = providers[0].query(&TableQuery::default()).unwrap();
         assert_eq!(suites_data.total_rows, 10);
+    }
+
+    #[test]
+    fn prefers_release_binaries_and_reads_portable_suite_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path();
+        let spec = &KNOWN_SUITES[6]; // mail2rust
+        let dbg_dir = ws.join(spec.repo_dir).join("target").join("debug");
+        let rel_dir = ws.join(spec.repo_dir).join("target").join("release");
+        fs::create_dir_all(&dbg_dir).unwrap();
+        fs::create_dir_all(&rel_dir).unwrap();
+
+        let bin_file = exe_filename(spec.mcp_bin);
+        fs::write(rel_dir.join(&bin_file), b"release").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        fs::write(dbg_dir.join(&bin_file), b"debug-newer").unwrap();
+
+        // prefer_release = true selects release even when debug has newer mtime
+        let rel_launch = locate_suite_mcp_binary(Some(ws), spec, true).expect("release launch");
+        assert!(rel_launch.program.ends_with(Path::new("release").join(&bin_file)));
+
+        // Portable layout reads suites/<suite_id>/metadata.json and isolates discovery
+        let port = ws.join("portable");
+        let suite_port = port.join("suites").join(spec.suite_id);
+        fs::create_dir_all(&suite_port).unwrap();
+        fs::write(port.join("guap-portable.marker"), b"guap-portable v0.1.0\n").unwrap();
+        fs::write(suite_port.join(&bin_file), b"portable-bin").unwrap();
+        fs::write(
+            suite_port.join("metadata.json"),
+            r#"{"version":"3.5.0","description":"Portable PST engine"}"#,
+        )
+        .unwrap();
+
+        let meta = read_suite_metadata(Some(&port), spec).expect("portable metadata");
+        assert_eq!(meta["version"], json!("3.5.0"));
+        assert_eq!(meta["description"], json!("Portable PST engine"));
+
+        let port_launch = locate_suite_mcp_binary(Some(&port), spec, true).expect("portable launch");
+        assert_eq!(port_launch.program, suite_port.join(&bin_file));
+
+        // Missing suite in portable layout must NOT leak to host PATH
+        let absent_spec = &KNOWN_SUITES[0];
+        assert!(locate_suite_mcp_binary(Some(&port), absent_spec, true).is_none());
     }
 }

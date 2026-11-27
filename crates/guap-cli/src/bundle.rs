@@ -39,6 +39,25 @@ fn exe_name(base: &str) -> String {
     }
 }
 
+fn is_companion_llama_lib(file_name: &str, include_cuda: bool) -> bool {
+    let lower = file_name.to_ascii_lowercase();
+    let is_shared = lower.ends_with(".dll") || lower.ends_with(".so") || lower.ends_with(".dylib");
+    if !is_shared {
+        return false;
+    }
+    if lower.starts_with("ggml-cuda") {
+        return include_cuda;
+    }
+    lower.starts_with("ggml")
+        || lower == "llama.dll"
+        || lower.starts_with("libllama")
+        || lower.starts_with("llama-common")
+        || lower.starts_with("llama-server-impl")
+        || lower.starts_with("mtmd")
+        || lower.starts_with("libomp")
+        || lower.starts_with("vcomp")
+}
+
 /// Assemble a self-contained `guap-portable` folder/USB layout with a cryptographic
 /// SHA-256 + SHA-512 Merkle `CustodyManifest` (`portable-manifest.custody.json`).
 pub fn create_portable_bundle(
@@ -47,6 +66,7 @@ pub fn create_portable_bundle(
     guap_bin_dir: Option<&Path>,
     llama_server_bin: Option<&Path>,
     gguf_model: Option<&Path>,
+    include_cuda: bool,
 ) -> anyhow::Result<BundleSummary> {
     fs::create_dir_all(out_dir.join("suites"))?;
     fs::create_dir_all(out_dir.join("llm").join("models"))?;
@@ -82,12 +102,14 @@ pub fn create_portable_bundle(
         }
     }
 
-    // 3. Copy discovered suite MCP binaries (and Python modules for `mail2mail` when present)
+    // 3. Copy discovered suite MCP binaries (and Python modules / metadata.json when present)
     let mut suites_bundled = Vec::new();
+    let ws_root = catalog.config().workspace_root.as_deref();
     for suite in catalog.suites() {
         let Some(ref launch) = suite.launch else {
             continue;
         };
+        let mut copied_suite = false;
         if suite.suite_id == "mail2mail" {
             // For `mail2mail`, `prefix_args[0]` is `<repo>/mail2mcp.py` when running from source
             if let Some(script_str) = launch.prefix_args.first() {
@@ -117,14 +139,11 @@ pub fn create_portable_bundle(
                                 staged_rel_paths.push(rel);
                             }
                         }
-                        suites_bundled.push(suite.suite_id.clone());
+                        copied_suite = true;
                     }
                 }
             }
-            continue;
-        }
-
-        if launch.program.is_file()
+        } else if launch.program.is_file()
             && let Some(fname) = launch.program.file_name()
         {
             let dst_suite_dir = out_dir.join("suites").join(&suite.suite_id);
@@ -133,11 +152,25 @@ pub fn create_portable_bundle(
             fs::copy(&launch.program, out_dir.join(&rel))
                 .with_context(|| format!("failed copying suite binary {}", launch.program.display()))?;
             staged_rel_paths.push(rel);
+            copied_suite = true;
+        }
+
+        if copied_suite {
             suites_bundled.push(suite.suite_id.clone());
+            if let Some(root) = ws_root
+                && let Some(spec) = KNOWN_SUITES.iter().find(|s| s.suite_id == suite.suite_id)
+            {
+                let meta_src = root.join(spec.repo_dir).join("metadata.json");
+                if meta_src.is_file() {
+                    let meta_rel = PathBuf::from("suites").join(&suite.suite_id).join("metadata.json");
+                    fs::copy(&meta_src, out_dir.join(&meta_rel))?;
+                    staged_rel_paths.push(meta_rel);
+                }
+            }
         }
     }
 
-    // 4. Optional offline `llama-server` + `guap-admin` GGUF drop-in
+    // 4. Optional offline `llama-server` (+ companion runtime DLLs) and GGUF drop-in
     if let Some(srv) = llama_server_bin {
         if !srv.is_file() {
             bail!("--llama-server file does not exist: {}", srv.display());
@@ -146,6 +179,31 @@ pub fn create_portable_bundle(
         let rel = PathBuf::from("llm").join(fname);
         fs::copy(srv, out_dir.join(&rel))?;
         staged_rel_paths.push(rel);
+
+        if let Some(srv_dir) = srv.parent()
+            && let Ok(entries) = fs::read_dir(srv_dir)
+        {
+            let mut libs: Vec<PathBuf> = entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.is_file()
+                        && p.file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|n| is_companion_llama_lib(n, include_cuda))
+                            .unwrap_or(false)
+                })
+                .collect();
+            libs.sort();
+            for lib in libs {
+                if let Some(name) = lib.file_name() {
+                    let lib_rel = PathBuf::from("llm").join(name);
+                    fs::copy(&lib, out_dir.join(&lib_rel))
+                        .with_context(|| format!("failed copying llama companion lib {}", lib.display()))?;
+                    staged_rel_paths.push(lib_rel);
+                }
+            }
+        }
     }
     if let Some(gguf) = gguf_model {
         if !gguf.is_file() {
@@ -164,11 +222,11 @@ pub fn create_portable_bundle(
         out_dir.join(&llm_readme_rel),
         "GUAP Portable Offline LLM Runtime\n\
          ==================================\n\
-         Place `llama-server.exe` (CPU or Vulkan build) in `llm/` and a quantized `.gguf`\n\
-         (e.g. `guap-admin-v0.1-q4_k_m.gguf` or `gemma-4-E4B-it-Q4_K_XL.gguf`) in `llm/models/`.\n\
-         When `guap ask` runs and `127.0.0.1:9931` is not already active, `guap` automatically\n\
-         spawns the bundled `llama-server` on an ephemeral loopback port (`127.0.0.1`) and\n\
-         terminates it cleanly on exit.\n",
+         Place `llama-server.exe` (CPU or Vulkan build + companion ggml/llama DLLs) in `llm/`\n\
+         and a quantized `.gguf` (e.g. `guap-admin-v0.1-q4_k_m.gguf` or `gemma-4-E4B-it-UD-Q4_K_XL.gguf`)\n\
+         in `llm/models/`. When `guap ask` runs and `127.0.0.1:9931` is not already active,\n\
+         `guap` automatically spawns the bundled `llama-server` on an ephemeral loopback port\n\
+         (`127.0.0.1`) and terminates it cleanly on exit.\n",
     )?;
     staged_rel_paths.push(llm_readme_rel);
 
@@ -281,4 +339,53 @@ pub fn verify_portable_bundle(bundle_dir: &Path) -> anyhow::Result<BundleVerifyR
         expected_merkle_sha256: manifest.merkle_root_sha256,
         actual_merkle_sha256: actual_merkle_256,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use guap_catalog::CatalogConfig;
+
+    use super::*;
+
+    #[test]
+    fn filters_companion_llama_dlls_and_detects_tampering() {
+        assert!(is_companion_llama_lib("ggml-base.dll", false));
+        assert!(is_companion_llama_lib("llama-server-impl.dll", false));
+        assert!(is_companion_llama_lib("llama.dll", false));
+        assert!(is_companion_llama_lib("mtmd.dll", false));
+        assert!(!is_companion_llama_lib("llama-bench-impl.dll", false));
+        assert!(!is_companion_llama_lib("ggml-cuda.dll", false));
+        assert!(is_companion_llama_lib("ggml-cuda.dll", true));
+
+        let tmp = tempfile::tempdir().unwrap();
+        let llm_src = tmp.path().join("llm_src");
+        fs::create_dir_all(&llm_src).unwrap();
+        let srv_path = llm_src.join(exe_name("llama-server"));
+        fs::write(&srv_path, b"srv").unwrap();
+        fs::write(llm_src.join("ggml-base.dll"), b"ggml-base").unwrap();
+        fs::write(llm_src.join("llama-server-impl.dll"), b"srv-impl").unwrap();
+        fs::write(llm_src.join("llama-bench-impl.dll"), b"bench-ignored").unwrap();
+        fs::write(llm_src.join("ggml-cuda.dll"), b"cuda-ignored").unwrap();
+
+        let gguf_path = tmp.path().join("demo.gguf");
+        fs::write(&gguf_path, b"gguf").unwrap();
+
+        let out_dir = tmp.path().join("bundle");
+        let cat = SuiteCatalog::discover(CatalogConfig::offline());
+        let summary = create_portable_bundle(&cat, &out_dir, None, Some(&srv_path), Some(&gguf_path), false).unwrap();
+        assert!(summary.copied_artifacts >= 7);
+        assert!(out_dir.join("llm").join("ggml-base.dll").is_file());
+        assert!(out_dir.join("llm").join("llama-server-impl.dll").is_file());
+        assert!(!out_dir.join("llm").join("llama-bench-impl.dll").exists());
+        assert!(!out_dir.join("llm").join("ggml-cuda.dll").exists());
+
+        let ok = verify_portable_bundle(&out_dir).unwrap();
+        assert!(ok.verified);
+
+        // Tampering with bundled DLL must fail Merkle verification
+        fs::write(out_dir.join("llm").join("ggml-base.dll"), b"tampered").unwrap();
+        let bad = verify_portable_bundle(&out_dir).unwrap();
+        assert!(!bad.verified);
+        assert!(!bad.mismatches.is_empty());
+    }
 }

@@ -168,6 +168,9 @@ pub enum BundleCommand {
         /// Optional quantized .gguf model to bundle into llm/models/
         #[arg(long, value_name = "FILE")]
         gguf: Option<PathBuf>,
+        /// Include optional CUDA GPU backend DLLs (ggml-cuda.dll) when bundling llama-server
+        #[arg(long)]
+        include_cuda: bool,
     },
     /// Verify every artifact and the SHA-256/SHA-512 Merkle roots of a portable bundle
     Verify {
@@ -246,6 +249,8 @@ fn build_stack(cli: &Cli) -> anyhow::Result<Arc<RouterEngine>> {
     }
     if cli.offline {
         cat_cfg.mode = CatalogMode::Offline;
+    } else if matches!(cli.command, Commands::Bundle { .. }) {
+        cat_cfg.prefer_release_binaries = true;
     }
 
     let catalog = Arc::new(SuiteCatalog::discover(cat_cfg));
@@ -551,6 +556,7 @@ pub fn run_cli(cli: &Cli) -> anyhow::Result<()> {
                 bin_dir,
                 llama_server,
                 gguf,
+                include_cuda,
             } => {
                 let summary = bundle::create_portable_bundle(
                     router.catalog(),
@@ -558,6 +564,7 @@ pub fn run_cli(cli: &Cli) -> anyhow::Result<()> {
                     bin_dir.as_deref(),
                     llama_server.as_deref(),
                     gguf.as_deref(),
+                    *include_cuda,
                 )?;
                 println!("{}", serde_json::to_string_pretty(&summary)?);
             }

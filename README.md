@@ -41,6 +41,10 @@ cargo run -p guap-cli -- ask "Check overall system health and storage readiness"
 
 # Launch the 6-meta-tool MCP stdio gateway
 cargo run -p guap-cli -- mcp
+
+# Assemble and cryptographically verify a self-contained guap-portable bundle
+cargo run -p guap-cli -- bundle create --out ./dist/guap-portable
+cargo run -p guap-cli -- bundle verify --dir ./dist/guap-portable
 ```
 
 ## License
