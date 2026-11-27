@@ -1,0 +1,55 @@
+{
+  "name": "guap",
+  "version": "0.1.0",
+  "description": "Flagship pure-Rust single-machine offline AI + human IT administration appliance federating all 10 GUAP domain suites (326 MCP tools) via 6 deterministic runbooks, a 6-meta-tool lazy MCP router, human Approval Cards, Merkle custody receipts, and dual Win32/Iced consoles.",
+  "repository": "https://github.com/adpaolucci/guap",
+  "homepage": "https://guap.ca",
+  "license": "Apache-2.0",
+  "mcp_tools_count": 6,
+  "binaries": [
+    "guap",
+    "guap-win32",
+    "guap-iced"
+  ],
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "Dynamic federation of all 10 GUAP suites (326 MCP tools across sys2rust, net2rust, forensics2rust, winctl2rust, fs2rust, chrome2rust, mail2rust, mail2mail, android2rust, robocopy2rust)",
+    "6 deterministic <200ms IT triage runbooks with GuapQuery filtering and SHA-256/512 Merkle CustodyManifest receipts",
+    "6-meta-tool (~800-token) lazy MCP gateway eliminating 326-schema context bloat",
+    "Tiered Autonomy Policy Engine: read-only tools run freely; mutating fixes require dry_run preview + SQLite Approval Card + human sign-off",
+    "Offline localhost llama-server OpenAI-compatible tool-calling agent loop (zero external API keys)",
+    "Dual zero-GPU Win32 (WinSafe) and cross-platform Iced 0.14 desktop consoles"
+  ],
+  "tools": [
+    {
+      "id": "guap_host_summary",
+      "readOnly": true,
+      "summary": "Snapshot host OS, CPU/memory/storage posture, local LLM status, and discovered GUAP suites"
+    },
+    {
+      "id": "guap_run_runbook",
+      "readOnly": true,
+      "summary": "Execute one of the 6 deterministic IT diagnostic runbooks and emit a compact digest + Merkle custody manifest"
+    },
+    {
+      "id": "guap_find_tools",
+      "readOnly": true,
+      "summary": "Search the 326-tool federated catalog and lazy-load 1..=5 matching JSON schemas"
+    },
+    {
+      "id": "guap_call_readonly",
+      "readOnly": true,
+      "summary": "Invoke any read-only tool across the 10 GUAP suites with optional row/byte budget caps"
+    },
+    {
+      "id": "guap_stage_fix",
+      "readOnly": false,
+      "summary": "Run a non-destructive dry_run preview and stage a pending human Approval Card (never mutates without explicit sign-off)"
+    },
+    {
+      "id": "guap_manage_schedule",
+      "readOnly": false,
+      "summary": "List, inspect, or stage deterministic recurring Job Profiles for local maintenance"
+    }
+  ]
+}

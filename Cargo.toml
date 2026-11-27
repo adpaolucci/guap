@@ -1,0 +1,82 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/guap-catalog",
+    "crates/guap-runbooks",
+    "crates/guap-router",
+    "crates/guap-llm",
+    "crates/guap-cli",
+    "crates/guap-win32",
+    "crates/guap-iced",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+repository = "https://github.com/adpaolucci/guap"
+homepage = "https://guap.ca"
+documentation = "https://guap.ca"
+authors = ["GUAP Contributors"]
+description = "Flagship pure-Rust single-machine offline AI + human IT administration appliance federating the 10 GUAP domain suites (326 MCP tools) with deterministic runbooks, lazy MCP routing, human Approval Cards, and dual Win32/Iced consoles"
+keywords = ["guap", "sysadmin", "forensics", "gui", "mcp"]
+categories = ["command-line-utilities", "gui", "development-tools"]
+
+[workspace.dependencies]
+# Internal workspace crates
+guap-catalog = { path = "crates/guap-catalog" }
+guap-runbooks = { path = "crates/guap-runbooks" }
+guap-router = { path = "crates/guap-router" }
+guap-llm = { path = "crates/guap-llm" }
+
+# Shared GUAP foundation crates (sibling workspace ../guap-kit)
+guap-table = { path = "../guap-kit/crates/guap-table" }
+guap-export = { path = "../guap-kit/crates/guap-export" }
+guap-gui-win32 = { path = "../guap-kit/crates/guap-gui-win32" }
+guap-gui-iced = { path = "../guap-kit/crates/guap-gui-iced" }
+guap-mcp = { path = "../guap-kit/crates/guap-mcp" }
+
+# Offline-verified external crates from local Cargo cache
+anyhow = "1.0"
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.13"
+sha2 = "0.11"
+csv = "1.4"
+dirs = "7.0"
+tempfile = "3.27"
+walkdir = "2.5"
+clap = { version = "4.6", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+ctrlc = "3.5"
+rusqlite = { version = "0.34", features = ["bundled"] }
+embed-resource = "3.0"
+winsafe = { version = "0.0.29", features = ["gui", "shell"] }
+iced = { version = "0.14", features = ["wgpu", "tiny-skia", "tokio"] }
+rfd = "0.18"
+arboard = "3.7"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_UI_Controls",
+] }
+
+[profile.dev.package.clap]
+opt-level = 2
+
+[profile.dev.package.clap_builder]
+opt-level = 2
+
+[profile.dev.package.clap_derive]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

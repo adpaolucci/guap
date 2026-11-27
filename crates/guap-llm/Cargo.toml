@@ -1,0 +1,23 @@
+[package]
+name = "guap-llm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Loopback-enforced offline llama-server HTTP/1.1 client and 6-meta-tool IT administration agent loop"
+
+[dependencies]
+guap-router.workspace = true
+guap-mcp.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+guap-catalog.workspace = true
+guap-runbooks.workspace = true
+tempfile.workspace = true

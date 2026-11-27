@@ -1,0 +1,23 @@
+[package]
+name = "guap-runbooks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Six deterministic IT administration and triage runbooks with GuapQuery filtering and SHA-256/512 Merkle custody manifests"
+
+[dependencies]
+guap-catalog.workspace = true
+guap-table.workspace = true
+guap-export.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

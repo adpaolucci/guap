@@ -1,0 +1,14 @@
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      offline:
+        type: boolean
+        default: false
+        description: Run in deterministic offline synthetic fixture mode
+  commandFunction: |-
+    (config) => ({
+      command: 'guap',
+      args: config.offline ? ['--offline', 'mcp'] : ['mcp']
+    })

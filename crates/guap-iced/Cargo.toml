@@ -1,0 +1,26 @@
+[package]
+name = "guap-iced"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cross-platform Iced 0.14 desktop console for the GUAP Flagship Appliance via guap-gui-iced"
+
+[[bin]]
+name = "guap-iced"
+path = "src/main.rs"
+
+[dependencies]
+guap-catalog.workspace = true
+guap-runbooks.workspace = true
+guap-router.workspace = true
+guap-table.workspace = true
+guap-gui-iced.workspace = true
+iced.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

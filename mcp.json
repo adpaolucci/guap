@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "guap": {
+      "command": "guap",
+      "args": ["mcp"],
+      "description": "GUAP Flagship Appliance 6-meta-tool lazy MCP gateway federating all 10 GUAP suites (326 tools) with deterministic runbooks and human Approval Cards"
+    }
+  }
+}

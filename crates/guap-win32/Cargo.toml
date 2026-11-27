@@ -1,0 +1,35 @@
+[package]
+name = "guap-win32"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native zero-GPU Win32 workstation console for the GUAP Flagship Appliance via guap-gui-win32 and WinSafe"
+
+[[bin]]
+name = "guap-win32"
+path = "src/main.rs"
+
+[dependencies]
+guap-catalog.workspace = true
+guap-runbooks.workspace = true
+guap-router.workspace = true
+guap-table.workspace = true
+guap-mcp.workspace = true
+guap-gui-win32.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winsafe.workspace = true
+windows.workspace = true
+arboard.workspace = true
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
