@@ -3,13 +3,14 @@
   "version": "0.1.0",
   "description": "Flagship pure-Rust single-machine offline AI + human IT administration appliance federating all 10 GUAP domain suites (326 MCP tools) via 6 deterministic runbooks, a 6-meta-tool lazy MCP router, human Approval Cards, Merkle custody receipts, and dual Win32/Iced consoles.",
   "repository": "https://github.com/adpaolucci/guap",
-  "homepage": "https://guap.ca",
+  "homepage": "https://guap.ca/guap/",
   "license": "Apache-2.0",
   "mcp_tools_count": 6,
   "binaries": [
     "guap",
     "guap-win32",
-    "guap-iced"
+    "guap-iced",
+    "guap-mcp"
   ],
   "requestFramePermissions": [],
   "majorCapabilities": [

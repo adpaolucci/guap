@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WiX v4/v5 single-machine Windows Installer manifest for GUAP v0.1.0 (zero network daemons per Charter G3) -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="GUAP — Generalized Utility &amp; Administration Platform"
+    Manufacturer="Andrew D. Paolucci"
+    Version="0.1.0.0"
+    UpgradeCode="9E3B7D4A-6F8C-4B3D-9A1E-4D62F7C8B301"
+    Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of GUAP is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="ProductFeature" Title="GUAP Offline AI &amp; IT Administration Appliance" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentRef Id="PathEnvironment" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="GUAP" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="GUAP" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="GuapCliExe" Guid="2F7C4D5A-91B0-4F81-8C12-1044B8A5C001">
+        <File Id="GuapExeFile" Source="$(var.BinDir)\guap.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="GuapMcpExe" Guid="2F7C4D5A-91B0-4F81-8C12-1044B8A5C002">
+        <File Id="GuapMcpExeFile" Source="$(var.BinDir)\guap-mcp.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="GuapWin32Exe" Guid="2F7C4D5A-91B0-4F81-8C12-1044B8A5C003">
+        <File Id="GuapWin32ExeFile" Source="$(var.BinDir)\guap-win32.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="GuapIcedExe" Guid="2F7C4D5A-91B0-4F81-8C12-1044B8A5C004">
+        <File Id="GuapIcedExeFile" Source="$(var.BinDir)\guap-iced.exe" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Component Id="PathEnvironment" Directory="INSTALLFOLDER" Guid="2F7C4D5A-91B0-4F81-8C12-1044B8A5C005">
+      <Environment
+        Id="PATH"
+        Name="PATH"
+        Value="[INSTALLFOLDER]"
+        Permanent="no"
+        Part="last"
+        Action="set"
+        System="yes" />
+    </Component>
+
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="ApplicationShortcut" Guid="2F7C4D5A-91B0-4F81-8C12-1044B8A5C006">
+        <Shortcut
+          Id="ApplicationStartMenuShortcut"
+          Name="GUAP Console (Win32)"
+          Description="Launch the GUAP Pure-Rust IT Administration Workstation"
+          Target="[INSTALLFOLDER]guap-win32.exe"
+          WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\GUAP" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Package>
+</Wix>

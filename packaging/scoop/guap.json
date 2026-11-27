@@ -1,0 +1,28 @@
+{
+  "version": "0.1.0",
+  "description": "Pure-Rust single-machine offline AI & IT administration appliance federating 10 GUAP domain suites (326 MCP tools).",
+  "homepage": "https://guap.ca/guap/",
+  "license": "Apache-2.0",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/adpaolucci/guap/releases/download/v0.1.0/guap-x86_64-pc-windows-msvc.zip",
+      "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "bin": [
+    "guap.exe",
+    "guap-mcp.exe",
+    "guap-win32.exe",
+    "guap-iced.exe"
+  ],
+  "checkver": {
+    "github": "https://github.com/adpaolucci/guap"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/adpaolucci/guap/releases/download/v$version/guap-x86_64-pc-windows-msvc.zip"
+      }
+    }
+  }
+}

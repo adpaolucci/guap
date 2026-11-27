@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
+
+PackageIdentifier: adpaolucci.guap
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: adpaolucci
+PublisherUrl: https://github.com/adpaolucci
+PublisherSupportUrl: https://github.com/adpaolucci/guap/issues
+PackageName: GUAP
+PackageUrl: https://guap.ca/guap/
+License: Apache-2.0
+LicenseUrl: https://github.com/adpaolucci/guap/blob/main/LICENSE
+Copyright: Copyright (c) 2026 Andrew D. Paolucci
+ShortDescription: Pure-Rust single-machine offline AI and IT administration appliance federating 10 domain suites (326 MCP tools) with deterministic runbooks, Approval Cards, and dual GUIs.
+Description: >-
+  GUAP (Generalized Utility & Administration Platform) is a single-machine, pure-Rust offline AI
+  and human IT administration appliance unifying 10 GUAP domain suites (326 MCP tools) behind
+  6 deterministic runbooks, a 6-meta-tool lazy MCP router, SQLite human Approval Cards,
+  SHA-256/512 Merkle custody receipts, loopback-only llama-server inference, and dual Win32/Iced consoles.
+Moniker: guap
+Tags:
+  - guap
+  - sysadmin
+  - forensics
+  - offline-ai
+  - llama-server
+  - win32
+  - rust
+  - cli
+  - gui
+  - mcp
+ReleaseNotesUrl: https://github.com/adpaolucci/guap/releases/tag/v0.1.0
+Documentations:
+  - DocumentLabel: Project Hub & Documentation
+    DocumentUrl: https://guap.ca/guap/
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0
