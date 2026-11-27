@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod bundle;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -142,6 +144,36 @@ pub enum Commands {
         /// Print the 6 flagship MCP meta-tool schemas as JSON and exit
         #[arg(long)]
         tools: bool,
+    },
+    /// Create or cryptographically verify a self-contained `guap-portable` USB/folder bundle
+    Bundle {
+        #[command(subcommand)]
+        action: BundleCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum BundleCommand {
+    /// Assemble a portable folder/USB bundle containing guap binaries, discovered suite MCPs, and a Merkle manifest
+    Create {
+        /// Destination portable bundle directory
+        #[arg(long, value_name = "DIR")]
+        out: PathBuf,
+        /// Optional directory containing compiled guap/guap-mcp/guap-win32/guap-iced binaries
+        #[arg(long, value_name = "DIR")]
+        bin_dir: Option<PathBuf>,
+        /// Optional CPU/Vulkan llama-server binary to bundle into llm/
+        #[arg(long, value_name = "FILE")]
+        llama_server: Option<PathBuf>,
+        /// Optional quantized .gguf model to bundle into llm/models/
+        #[arg(long, value_name = "FILE")]
+        gguf: Option<PathBuf>,
+    },
+    /// Verify every artifact and the SHA-256/SHA-512 Merkle roots of a portable bundle
+    Verify {
+        /// Portable bundle directory containing portable-manifest.custody.json
+        #[arg(long, default_value = ".", value_name = "DIR")]
+        dir: PathBuf,
     },
 }
 
@@ -513,6 +545,33 @@ pub fn run_cli(cli: &Cli) -> anyhow::Result<()> {
             }
             reg.serve_stdio()?;
         }
+        Commands::Bundle { action } => match action {
+            BundleCommand::Create {
+                out,
+                bin_dir,
+                llama_server,
+                gguf,
+            } => {
+                let summary = bundle::create_portable_bundle(
+                    router.catalog(),
+                    out,
+                    bin_dir.as_deref(),
+                    llama_server.as_deref(),
+                    gguf.as_deref(),
+                )?;
+                println!("{}", serde_json::to_string_pretty(&summary)?);
+            }
+            BundleCommand::Verify { dir } => {
+                let report = bundle::verify_portable_bundle(dir)?;
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                if !report.verified {
+                    anyhow::bail!(
+                        "portable bundle integrity check FAILED ({} mismatch(es))",
+                        report.mismatches.len()
+                    );
+                }
+            }
+        },
     }
     Ok(())
 }
@@ -547,5 +606,33 @@ mod tests {
         let mcp_tools_cli =
             Cli::try_parse_from(["guap", "--offline", "--state-dir", &state_str, "mcp", "--tools"]).unwrap();
         run_cli(&mcp_tools_cli).unwrap();
+
+        let bundle_dir = tmp.path().join("portable_test");
+        let bundle_dir_str = bundle_dir.display().to_string();
+        let create_cli = Cli::try_parse_from([
+            "guap",
+            "--offline",
+            "--state-dir",
+            &state_str,
+            "bundle",
+            "create",
+            "--out",
+            &bundle_dir_str,
+        ])
+        .unwrap();
+        run_cli(&create_cli).unwrap();
+
+        let verify_cli = Cli::try_parse_from([
+            "guap",
+            "--offline",
+            "--state-dir",
+            &state_str,
+            "bundle",
+            "verify",
+            "--dir",
+            &bundle_dir_str,
+        ])
+        .unwrap();
+        run_cli(&verify_cli).unwrap();
     }
 }

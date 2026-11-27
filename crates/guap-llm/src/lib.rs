@@ -4,10 +4,15 @@
 //! OpenAI-compatible IT administration agent loop (`#![forbid(unsafe_code)]`,
 //! zero external HTTP crate dependencies).
 
+use std::env;
+use std::fs;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use guap_mcp::McpServerRegistry;
 use guap_router::RouterEngine;
@@ -347,6 +352,126 @@ pub fn probe_local_llama_server(chat_endpoint: &str, timeout: Duration) -> LlmSe
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BundledLlamaSpec {
+    pub server_bin: PathBuf,
+    pub model_gguf: PathBuf,
+}
+
+/// Discover a portable bundled `llama-server` + `.gguf` inside `<portable_root>/llm/`.
+pub fn discover_bundled_llama_in_dir(portable_root: &Path) -> Option<BundledLlamaSpec> {
+    let llm_dir = portable_root.join("llm");
+    let bin_name = if cfg!(windows) {
+        "llama-server.exe"
+    } else {
+        "llama-server"
+    };
+    let server_bin = llm_dir.join(bin_name);
+    if !server_bin.is_file() {
+        return None;
+    }
+
+    let models_dir = llm_dir.join("models");
+    let mut ggufs: Vec<PathBuf> = Vec::new();
+    for search_dir in [&models_dir, &llm_dir] {
+        if let Ok(entries) = fs::read_dir(search_dir) {
+            for ent in entries.flatten() {
+                let p = ent.path();
+                if p.is_file()
+                    && p.extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.eq_ignore_ascii_case("gguf"))
+                        .unwrap_or(false)
+                {
+                    ggufs.push(p);
+                }
+            }
+        }
+    }
+    ggufs.sort();
+    ggufs.dedup();
+    if ggufs.is_empty() {
+        return None;
+    }
+
+    for pref in ["guap-admin", "gemma-4-e4b", "nemotron-3.5-bolt", "qwen3.5"] {
+        if let Some(found) = ggufs.iter().find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.to_ascii_lowercase().contains(pref))
+                .unwrap_or(false)
+        }) {
+            return Some(BundledLlamaSpec {
+                server_bin,
+                model_gguf: found.clone(),
+            });
+        }
+    }
+
+    Some(BundledLlamaSpec {
+        server_bin,
+        model_gguf: ggufs.remove(0),
+    })
+}
+
+struct BundledLlamaGuard {
+    child: Child,
+    endpoint: String,
+}
+
+impl Drop for BundledLlamaGuard {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn start_ephemeral_bundled_llama(
+    spec: &BundledLlamaSpec,
+    ready_timeout: Duration,
+) -> Result<BundledLlamaGuard, LlmError> {
+    let port = TcpListener::bind("127.0.0.1:0")
+        .and_then(|l| l.local_addr())
+        .map(|a| a.port())
+        .unwrap_or(19931);
+    let endpoint = format!("http://127.0.0.1:{port}/v1/chat/completions");
+
+    let child = Command::new(&spec.server_bin)
+        .args([
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+            "-m",
+            &spec.model_gguf.display().to_string(),
+            "-c",
+            "16384",
+            "--jinja",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| LlmError::Unreachable(endpoint.clone(), format!("failed spawning bundled llama-server: {e}")))?;
+
+    let guard = BundledLlamaGuard {
+        child,
+        endpoint: endpoint.clone(),
+    };
+    let deadline = Instant::now() + ready_timeout;
+    while Instant::now() < deadline {
+        let probe = probe_local_llama_server(&guard.endpoint, Duration::from_millis(800));
+        if probe.reachable {
+            return Ok(guard);
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    Err(LlmError::Unreachable(
+        endpoint,
+        "bundled llama-server did not become ready within timeout".to_string(),
+    ))
+}
+
 pub struct LocalAdminAgent {
     config: LlmClientConfig,
     router: Arc<RouterEngine>,
@@ -360,8 +485,26 @@ impl LocalAdminAgent {
     }
 
     pub fn ask(&self, question: &str) -> Result<AgentSessionResult, LlmError> {
-        let parsed_url = parse_loopback_http_url(&self.config.chat_endpoint)?;
-        let resolved_model = self.resolve_model_id();
+        let mut active_endpoint = self.config.chat_endpoint.clone();
+        let mut initial_probe = probe_local_llama_server(&active_endpoint, Duration::from_secs(2));
+        let _bundled_guard = if !initial_probe.reachable {
+            if let Ok(exe) = env::current_exe()
+                && let Some(exe_dir) = exe.parent()
+                && let Some(spec) = discover_bundled_llama_in_dir(exe_dir)
+            {
+                let guard = start_ephemeral_bundled_llama(&spec, Duration::from_secs(30))?;
+                active_endpoint = guard.endpoint.clone();
+                initial_probe = probe_local_llama_server(&active_endpoint, Duration::from_secs(2));
+                Some(guard)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let parsed_url = parse_loopback_http_url(&active_endpoint)?;
+        let resolved_model = self.select_model_id(&initial_probe);
         let openai_tools = self.build_openai_tools_spec();
 
         let system_prompt = "You are GUAP, a strictly local, privacy-preserving IT administration assistant running on this machine.\n\
@@ -481,15 +624,15 @@ impl LocalAdminAgent {
         })
     }
 
-    fn resolve_model_id(&self) -> String {
+    fn select_model_id(&self, probe: &LlmServerProbe) -> String {
         if !self.config.model.trim().is_empty() && !self.config.model.eq_ignore_ascii_case("auto") {
             return self.config.model.clone();
         }
-        let probe = probe_local_llama_server(&self.config.chat_endpoint, Duration::from_secs(3));
         let chat_models: Vec<String> = probe
             .loaded_models
-            .into_iter()
+            .iter()
             .filter(|m| !m.to_ascii_lowercase().contains("embed"))
+            .cloned()
             .collect();
         for pref in ["guap-admin", "gemma-4-e4b", "nemotron-3.5-bolt", "qwen3.5"] {
             if let Some(found) = chat_models.iter().find(|m| m.to_ascii_lowercase().contains(pref)) {
@@ -531,14 +674,37 @@ impl LocalAdminAgent {
 
 #[cfg(test)]
 mod tests {
-    use std::net::TcpListener;
-    use std::thread;
-
     use guap_catalog::{CatalogConfig, SuiteCatalog};
     use guap_router::RouterConfig;
     use guap_runbooks::RunbookEngine;
 
     use super::*;
+
+    #[test]
+    fn discovers_bundled_portable_llama_and_prefers_guap_admin_gguf() {
+        let tmp = tempfile::tempdir().unwrap();
+        let llm_dir = tmp.path().join("llm");
+        let models_dir = llm_dir.join("models");
+        fs::create_dir_all(&models_dir).unwrap();
+
+        let bin_name = if cfg!(windows) {
+            "llama-server.exe"
+        } else {
+            "llama-server"
+        };
+        fs::write(llm_dir.join(bin_name), b"stub-llama-server").unwrap();
+        fs::write(models_dir.join("other-model-q4.gguf"), b"gguf-1").unwrap();
+        fs::write(models_dir.join("guap-admin-v0.1-q4_k_m.gguf"), b"gguf-2").unwrap();
+
+        let spec = discover_bundled_llama_in_dir(tmp.path()).expect("should discover bundled llama");
+        assert!(
+            spec.model_gguf
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains("guap-admin")
+        );
+    }
 
     #[test]
     fn rejects_any_non_loopback_endpoint() {

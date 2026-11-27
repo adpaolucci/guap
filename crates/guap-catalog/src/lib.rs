@@ -818,6 +818,23 @@ fn locate_suite_mcp_binary(workspace_root: Option<&Path>, spec: &SuiteSpec) -> O
                 });
             }
         }
+
+        if let Some(py_script) = spec.python_script_fallback {
+            for script_candidate in [
+                exe_dir.join("suites").join(spec.suite_id).join(py_script),
+                exe_dir.join("suites").join(spec.repo_dir).join(py_script),
+            ] {
+                if script_candidate.is_file()
+                    && let Some(py_exe) = find_on_path(if cfg!(windows) { "python.exe" } else { "python3" })
+                        .or_else(|| find_on_path("python"))
+                {
+                    return Some(McpLaunchSpec {
+                        program: py_exe,
+                        prefix_args: vec![script_candidate.display().to_string()],
+                    });
+                }
+            }
+        }
     }
 
     // 2. Sibling workspace build outputs (pick newest mtime between debug and release!)

@@ -958,7 +958,7 @@ impl ActionCommand for RunRunbookMetaTool {
                 "runbook_id": {
                     "type": "string",
                     "enum": ids,
-                    "description": "Canonical deterministic IT runbook ID"
+                    "description": "Canonical runbook ID: health_and_security_posture (Defender/services/SMART), slowdown_and_startup_triage (boot/CPU/startup/IO), crash_and_event_postmortem (BSOD/WER/EVTX), storage_and_backup_audit (disk space/SMART/Robocopy backup), network_and_lan_triage (Wi-Fi/DNS/sockets/routes), mail_browser_device_rescue (Chrome/Edge profiles, PST/mail, Android ADB)"
                 },
                 "persist_report": {
                     "type": "boolean",
