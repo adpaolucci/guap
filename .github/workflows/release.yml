@@ -3,13 +3,15 @@ name: Release
 on:
   push:
     tags:
+      - "[0-9][0-9][0-9][0-9].*"
+      - "[0-9][0-9][0-9][0-9]-*"
       - "v*"
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release tag (e.g. v0.1.0)"
-        required: true
-        default: "v0.1.0"
+        description: "Release tag override (leave empty to auto-derive YYYY.MM.DD-<4-char-sha>)"
+        required: false
+        default: ""
       draft:
         description: "Draft release"
         type: boolean
@@ -49,7 +51,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout shared guap-kit workspace
         run: git clone --depth 1 https://github.com/adpaolucci/guap-kit.git ../guap-kit
@@ -101,6 +103,7 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/guap.exe" "$dir/"
           Copy-Item "target/${{ matrix.target }}/release/guap-win32.exe" "$dir/"
           Copy-Item "target/${{ matrix.target }}/release/guap-iced.exe" "$dir/"
+          Copy-Item "target/${{ matrix.target }}/release/guap-mcp.exe" "$dir/"
           Copy-Item "README.md" "$dir/"
           Copy-Item "LICENSE" "$dir/"
           Copy-Item "NOTICE" "$dir/"
@@ -118,6 +121,7 @@ jobs:
           mkdir -p "$DIR"
           cp "target/${{ matrix.target }}/release/guap" "$DIR/"
           cp "target/${{ matrix.target }}/release/guap-iced" "$DIR/"
+          cp "target/${{ matrix.target }}/release/guap-mcp" "$DIR/"
           cp README.md LICENSE NOTICE CHANGELOG.md "$DIR/"
           cargo tree --workspace --locked > "$DIR/SBOM-crates.txt"
           tar -czvf "target/$PKG_NAME.tar.gz" -C target "$PKG_NAME"
@@ -128,7 +132,7 @@ jobs:
           fi
 
       - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: guap-${{ matrix.target }}
           path: |
@@ -141,10 +145,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-artifacts
 
@@ -161,13 +165,18 @@ jobs:
         id: get_tag
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+            if [ -n "${{ inputs.tag_name }}" ]; then
+              TAG="${{ inputs.tag_name }}"
+            else
+              TAG="$(date -u +%Y.%m.%d)-$(git rev-parse HEAD | cut -c1-4)"
+            fi
           else
-            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            TAG="${GITHUB_REF#refs/tags/}"
           fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Create or Update GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.get_tag.outputs.tag }}
           name: GUAP ${{ steps.get_tag.outputs.tag }}
