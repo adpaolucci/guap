@@ -52,6 +52,9 @@ pub enum Commands {
         /// Output format: md, json, csv, tsv, html
         #[arg(long, default_value = "md")]
         format: String,
+        /// Emit machine-readable JSON (overrides --format)
+        #[arg(long)]
+        json: bool,
     },
     /// Search or browse the 326-tool federated GUAP catalog
     Tools {
@@ -84,6 +87,9 @@ pub enum Commands {
         /// Maximum rows returned
         #[arg(long, default_value_t = 25)]
         max_rows: usize,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
     /// List or execute the 6 deterministic IT triage runbooks
     Runbook {
@@ -103,6 +109,9 @@ pub enum Commands {
         /// JSON object arguments
         #[arg(long, default_value = "{}")]
         args: String,
+        /// Emit pure JSON without trailing human helper text
+        #[arg(long)]
+        json: bool,
     },
     /// Review, approve, or reject staged remediation Approval Cards
     Approvals {
@@ -171,12 +180,18 @@ pub enum BundleCommand {
         /// Include optional CUDA GPU backend DLLs (ggml-cuda.dll) when bundling llama-server
         #[arg(long)]
         include_cuda: bool,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Verify every artifact and the SHA-256/SHA-512 Merkle roots of a portable bundle
     Verify {
         /// Portable bundle directory containing portable-manifest.custody.json
         #[arg(long, default_value = ".", value_name = "DIR")]
         dir: PathBuf,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -197,6 +212,9 @@ pub enum RunbookCommand {
         /// Optional output directory for persisted report + .custody.json manifest
         #[arg(long, value_name = "DIR")]
         out_dir: Option<PathBuf>,
+        /// Emit machine-readable JSON (overrides --format)
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -210,11 +228,23 @@ pub enum ApprovalsCommand {
         json: bool,
     },
     /// Inspect full dry-run preview, arguments, and rollback plan for a Card
-    Inspect { card_id: String },
+    Inspect {
+        card_id: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Explicitly approve and execute a pending Card, writing a Merkle custody receipt
-    Approve { card_id: String },
+    Approve {
+        card_id: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Reject a pending Card without applying changes
-    Reject { card_id: String },
+    Reject {
+        card_id: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -225,9 +255,17 @@ pub enum JobCommand {
         json: bool,
     },
     /// Approve a staged Job Profile for deterministic execution
-    Approve { profile_id: String },
+    Approve {
+        profile_id: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Execute an approved deterministic Job Profile without invoking an LLM
-    Run { profile_id: String },
+    Run {
+        profile_id: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn init_tracing() {
@@ -337,8 +375,12 @@ pub fn run_cli(cli: &Cli) -> anyhow::Result<()> {
                 }
             }
         }
-        Commands::Suites { format } => {
-            let fmt = ExportFormat::parse(format)?;
+        Commands::Suites { format, json: as_json } => {
+            let fmt = if *as_json {
+                ExportFormat::Json
+            } else {
+                ExportFormat::parse(format)?
+            };
             let providers = SuiteCatalog::table_providers(Arc::clone(router.catalog()));
             let data = providers[0].query(&TableQuery::default())?;
             let bytes = export_table(&data, fmt, &ExportOptions::default())?;
@@ -379,7 +421,12 @@ pub fn run_cli(cli: &Cli) -> anyhow::Result<()> {
                 print!("{}", String::from_utf8_lossy(&bytes));
             }
         }
-        Commands::Call { tool, args, max_rows } => {
+        Commands::Call {
+            tool,
+            args,
+            max_rows,
+            json: _,
+        } => {
             let parsed_args: Value = serde_json::from_str(args)?;
             let out = router.call_readonly(tool, &parsed_args, *max_rows, 16_384)?;
             println!("{}", serde_json::to_string_pretty(&out)?);
@@ -410,8 +457,13 @@ pub fn run_cli(cli: &Cli) -> anyhow::Result<()> {
                 runbook_id,
                 format,
                 out_dir,
+                json: as_json,
             } => {
-                let fmt = ExportFormat::parse(format)?;
+                let fmt = if *as_json {
+                    ExportFormat::Json
+                } else {
+                    ExportFormat::parse(format)?
+                };
                 let target_dir = out_dir.clone().unwrap_or_else(|| router.reports_dir());
                 let report = router.runbooks().execute(runbook_id, Some(&target_dir), fmt)?;
                 if fmt == ExportFormat::Json {
@@ -433,11 +485,14 @@ pub fn run_cli(cli: &Cli) -> anyhow::Result<()> {
             rationale,
             rollback,
             args,
+            json: as_json,
         } => {
             let parsed_args: Value = serde_json::from_str(args)?;
             let card = router.stage_fix(tool, &parsed_args, rationale, rollback)?;
             println!("{}", serde_json::to_string_pretty(&card)?);
-            println!("\nTo approve and execute: guap approvals approve {}", card.card_id);
+            if !*as_json {
+                println!("\nTo approve and execute: guap approvals approve {}", card.card_id);
+            }
         }
         Commands::Approvals { action } => match action {
             ApprovalsCommand::List { status, json: as_json } => {
@@ -455,15 +510,15 @@ pub fn run_cli(cli: &Cli) -> anyhow::Result<()> {
                     }
                 }
             }
-            ApprovalsCommand::Inspect { card_id } => {
+            ApprovalsCommand::Inspect { card_id, json: _ } => {
                 let card = router.get_card(card_id)?;
                 println!("{}", serde_json::to_string_pretty(&card)?);
             }
-            ApprovalsCommand::Approve { card_id } => {
+            ApprovalsCommand::Approve { card_id, json: _ } => {
                 let card = router.approve_card(card_id, "cli-operator")?;
                 println!("{}", serde_json::to_string_pretty(&card)?);
             }
-            ApprovalsCommand::Reject { card_id } => {
+            ApprovalsCommand::Reject { card_id, json: _ } => {
                 let card = router.reject_card(card_id, "cli-operator")?;
                 println!("{}", serde_json::to_string_pretty(&card)?);
             }
@@ -482,11 +537,11 @@ pub fn run_cli(cli: &Cli) -> anyhow::Result<()> {
                     }
                 }
             }
-            JobCommand::Approve { profile_id } => {
+            JobCommand::Approve { profile_id, json: _ } => {
                 let job = router.approve_job_profile(profile_id)?;
                 println!("{}", serde_json::to_string_pretty(&job)?);
             }
-            JobCommand::Run { profile_id } => {
+            JobCommand::Run { profile_id, json: _ } => {
                 let res = router.run_job_profile(profile_id)?;
                 println!("{}", serde_json::to_string_pretty(&res)?);
             }
@@ -557,6 +612,7 @@ pub fn run_cli(cli: &Cli) -> anyhow::Result<()> {
                 llama_server,
                 gguf,
                 include_cuda,
+                json: as_json,
             } => {
                 let summary = bundle::create_portable_bundle(
                     router.catalog(),
@@ -566,11 +622,27 @@ pub fn run_cli(cli: &Cli) -> anyhow::Result<()> {
                     gguf.as_deref(),
                     *include_cuda,
                 )?;
-                println!("{}", serde_json::to_string_pretty(&summary)?);
+                if *as_json {
+                    let mut val = serde_json::to_value(&summary)?;
+                    if let Some(obj) = val.as_object_mut() {
+                        obj.insert("ok".to_string(), json!(true));
+                    }
+                    println!("{}", serde_json::to_string_pretty(&val)?);
+                } else {
+                    println!("{}", serde_json::to_string_pretty(&summary)?);
+                }
             }
-            BundleCommand::Verify { dir } => {
+            BundleCommand::Verify { dir, json: as_json } => {
                 let report = bundle::verify_portable_bundle(dir)?;
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                if *as_json {
+                    let mut val = serde_json::to_value(&report)?;
+                    if let Some(obj) = val.as_object_mut() {
+                        obj.insert("ok".to_string(), json!(report.verified));
+                    }
+                    println!("{}", serde_json::to_string_pretty(&val)?);
+                } else {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
                 if !report.verified {
                     anyhow::bail!(
                         "portable bundle integrity check FAILED ({} mismatch(es))",
@@ -596,6 +668,10 @@ mod tests {
             Cli::try_parse_from(["guap", "--offline", "--state-dir", &state_str, "status", "--json"]).unwrap();
         run_cli(&status_cli).unwrap();
 
+        let suites_cli =
+            Cli::try_parse_from(["guap", "--offline", "--state-dir", &state_str, "suites", "--json"]).unwrap();
+        run_cli(&suites_cli).unwrap();
+
         let rb_cli = Cli::try_parse_from([
             "guap",
             "--offline",
@@ -609,6 +685,38 @@ mod tests {
         ])
         .unwrap();
         run_cli(&rb_cli).unwrap();
+
+        let stage_cli = Cli::try_parse_from([
+            "guap",
+            "--offline",
+            "--state-dir",
+            &state_str,
+            "stage",
+            "sys2rust/service_set_start_mode",
+            "--rationale",
+            "unit test stage",
+            "--json",
+        ])
+        .unwrap();
+        run_cli(&stage_cli).unwrap();
+
+        let approve_parsed = Cli::try_parse_from([
+            "guap",
+            "--offline",
+            "--state-dir",
+            &state_str,
+            "approvals",
+            "approve",
+            "card-1",
+            "--json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            approve_parsed.command,
+            Commands::Approvals {
+                action: ApprovalsCommand::Approve { json: true, .. }
+            }
+        ));
 
         let mcp_tools_cli =
             Cli::try_parse_from(["guap", "--offline", "--state-dir", &state_str, "mcp", "--tools"]).unwrap();
@@ -625,6 +733,7 @@ mod tests {
             "create",
             "--out",
             &bundle_dir_str,
+            "--json",
         ])
         .unwrap();
         run_cli(&create_cli).unwrap();
@@ -638,6 +747,7 @@ mod tests {
             "verify",
             "--dir",
             &bundle_dir_str,
+            "--json",
         ])
         .unwrap();
         run_cli(&verify_cli).unwrap();

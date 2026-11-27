@@ -1184,6 +1184,10 @@ fn parse_raw_tool(spec: &SuiteSpec, raw: &Value) -> Option<IndexedTool> {
 
 fn parse_metadata_v2_tools(spec: &SuiteSpec, meta: &Value) -> Vec<IndexedTool> {
     let mut out = Vec::new();
+    let has_actions = meta
+        .get("actions")
+        .and_then(Value::as_array)
+        .is_some_and(|a| !a.is_empty());
     if let Some(tools) = meta.get("tools").and_then(Value::as_array) {
         for item in tools {
             let Some(id) = item.get("id").or_else(|| item.get("name")).and_then(Value::as_str) else {
@@ -1196,10 +1200,13 @@ fn parse_metadata_v2_tools(spec: &SuiteSpec, meta: &Value) -> Vec<IndexedTool> {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            let read_only = item
-                .get("readOnly")
-                .and_then(Value::as_bool)
-                .unwrap_or_else(|| !item.get("mutatingAction").and_then(Value::as_bool).unwrap_or(false));
+            let read_only = item.get("readOnly").and_then(Value::as_bool).unwrap_or_else(|| {
+                if has_actions {
+                    true
+                } else {
+                    !item.get("mutatingAction").and_then(Value::as_bool).unwrap_or(false)
+                }
+            });
             let keywords = extract_keywords(id, &desc, spec.domain);
             out.push(IndexedTool {
                 suite_id: spec.suite_id.to_string(),
@@ -1860,5 +1867,26 @@ mod tests {
         // Missing suite in portable layout must NOT leak to host PATH
         let absent_spec = &KNOWN_SUITES[0];
         assert!(locate_suite_mcp_binary(Some(&port), absent_spec, true).is_none());
+    }
+
+    #[test]
+    fn parse_metadata_v2_tools_treats_tools_as_readonly_when_actions_present() {
+        let spec = &KNOWN_SUITES[1]; // net2rust
+        let meta = json!({
+            "tools": [
+                { "id": "sockets.ports", "title": "Active Ports", "mutatingAction": true },
+                { "id": "sockets.tcplog", "title": "TCP Log", "mutatingAction": false },
+                { "id": "explicit.mut", "title": "Explicit RO False", "readOnly": false }
+            ],
+            "actions": [
+                { "id": "action.close_tcp", "title": "Close TCP Socket" }
+            ]
+        });
+        let parsed = parse_metadata_v2_tools(spec, &meta);
+        assert_eq!(parsed.len(), 4);
+        assert!(parsed[0].read_only);
+        assert!(parsed[1].read_only);
+        assert!(!parsed[2].read_only);
+        assert!(!parsed[3].read_only);
     }
 }
