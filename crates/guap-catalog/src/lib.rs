@@ -1192,10 +1192,14 @@ fn parse_metadata_v2_tools(spec: &SuiteSpec, meta: &Value) -> Vec<IndexedTool> {
             let desc = item
                 .get("summary")
                 .or_else(|| item.get("description"))
+                .or_else(|| item.get("title"))
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            let read_only = item.get("readOnly").and_then(Value::as_bool).unwrap_or(true);
+            let read_only = item
+                .get("readOnly")
+                .and_then(Value::as_bool)
+                .unwrap_or_else(|| !item.get("mutatingAction").and_then(Value::as_bool).unwrap_or(false));
             let keywords = extract_keywords(id, &desc, spec.domain);
             out.push(IndexedTool {
                 suite_id: spec.suite_id.to_string(),
