@@ -744,15 +744,7 @@ mod tests {
         .unwrap();
         run_cli(&create_cli).unwrap();
 
-        let verify_cli = Cli::try_parse_from([
-            "guap",
-            "bundle",
-            "verify",
-            "--dir",
-            &bundle_dir_str,
-            "--json",
-        ])
-        .unwrap();
+        let verify_cli = Cli::try_parse_from(["guap", "bundle", "verify", "--dir", &bundle_dir_str, "--json"]).unwrap();
         run_cli(&verify_cli).unwrap();
     }
 

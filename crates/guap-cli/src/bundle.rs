@@ -66,12 +66,7 @@ fn is_companion_llama_lib(file_name: &str, include_cuda: bool) -> bool {
 fn stage_windows_vc_runtime_dlls(out_dir: &Path, staged_rel_paths: &mut Vec<PathBuf>) -> anyhow::Result<()> {
     #[cfg(windows)]
     {
-        const RUNTIME_DLLS: &[&str] = &[
-            "vcruntime140.dll",
-            "vcruntime140_1.dll",
-            "msvcp140.dll",
-            "vcomp140.dll",
-        ];
+        const RUNTIME_DLLS: &[&str] = &["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "vcomp140.dll"];
         let sys_root = std::env::var_os("SystemRoot")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
