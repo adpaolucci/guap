@@ -311,6 +311,29 @@ fn main() -> anyhow::Result<()> {
 }
 
 pub fn run_cli(cli: &Cli) -> anyhow::Result<()> {
+    if let Commands::Bundle {
+        action: BundleCommand::Verify { dir, json: as_json },
+    } = &cli.command
+    {
+        let report = bundle::verify_portable_bundle(dir)?;
+        if *as_json {
+            let mut val = serde_json::to_value(&report)?;
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert("ok".to_string(), json!(report.verified));
+            }
+            println!("{}", serde_json::to_string_pretty(&val)?);
+        } else {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        if !report.verified {
+            anyhow::bail!(
+                "portable bundle integrity check FAILED ({} mismatch(es))",
+                report.mismatches.len()
+            );
+        }
+        return Ok(());
+    }
+
     let router = build_stack(cli)?;
     match &cli.command {
         Commands::Status { json: as_json } => {
@@ -632,24 +655,7 @@ pub fn run_cli(cli: &Cli) -> anyhow::Result<()> {
                     println!("{}", serde_json::to_string_pretty(&summary)?);
                 }
             }
-            BundleCommand::Verify { dir, json: as_json } => {
-                let report = bundle::verify_portable_bundle(dir)?;
-                if *as_json {
-                    let mut val = serde_json::to_value(&report)?;
-                    if let Some(obj) = val.as_object_mut() {
-                        obj.insert("ok".to_string(), json!(report.verified));
-                    }
-                    println!("{}", serde_json::to_string_pretty(&val)?);
-                } else {
-                    println!("{}", serde_json::to_string_pretty(&report)?);
-                }
-                if !report.verified {
-                    anyhow::bail!(
-                        "portable bundle integrity check FAILED ({} mismatch(es))",
-                        report.mismatches.len()
-                    );
-                }
-            }
+            BundleCommand::Verify { .. } => unreachable!("handled before build_stack"),
         },
     }
     Ok(())
@@ -740,9 +746,6 @@ mod tests {
 
         let verify_cli = Cli::try_parse_from([
             "guap",
-            "--offline",
-            "--state-dir",
-            &state_str,
             "bundle",
             "verify",
             "--dir",
@@ -750,6 +753,31 @@ mod tests {
             "--json",
         ])
         .unwrap();
+        run_cli(&verify_cli).unwrap();
+    }
+
+    #[test]
+    fn bundle_verify_succeeds_without_state_dir_on_readonly_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state_str = tmp.path().join("create_state").display().to_string();
+        let bundle_dir = tmp.path().join("portable_ro_test");
+        let bundle_dir_str = bundle_dir.display().to_string();
+
+        let create_cli = Cli::try_parse_from([
+            "guap",
+            "--offline",
+            "--state-dir",
+            &state_str,
+            "bundle",
+            "create",
+            "--out",
+            &bundle_dir_str,
+            "--json",
+        ])
+        .unwrap();
+        run_cli(&create_cli).unwrap();
+
+        let verify_cli = Cli::try_parse_from(["guap", "bundle", "verify", "--dir", &bundle_dir_str]).unwrap();
         run_cli(&verify_cli).unwrap();
     }
 }

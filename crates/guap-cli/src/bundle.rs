@@ -56,6 +56,45 @@ fn is_companion_llama_lib(file_name: &str, include_cuda: bool) -> bool {
         || lower.starts_with("mtmd")
         || lower.starts_with("libomp")
         || lower.starts_with("vcomp")
+        || lower.starts_with("vcruntime140")
+        || lower.starts_with("msvcp140")
+        || lower.starts_with("concrt140")
+}
+
+/// On Windows, stage redistributable VC++ / OpenMP runtime DLLs next to `llama-server.exe`
+/// so clean systems without the VC++ Redistributable can launch `llama-server` offline.
+fn stage_windows_vc_runtime_dlls(out_dir: &Path, staged_rel_paths: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        const RUNTIME_DLLS: &[&str] = &[
+            "vcruntime140.dll",
+            "vcruntime140_1.dll",
+            "msvcp140.dll",
+            "vcomp140.dll",
+        ];
+        let sys_root = std::env::var_os("SystemRoot")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        let sys32 = sys_root.join("System32");
+        for dll in RUNTIME_DLLS {
+            let rel = PathBuf::from("llm").join(dll);
+            let dst = out_dir.join(&rel);
+            if dst.is_file() {
+                continue;
+            }
+            let src = sys32.join(dll);
+            if src.is_file() {
+                fs::copy(&src, &dst)
+                    .with_context(|| format!("failed copying Windows runtime DLL {}", src.display()))?;
+                staged_rel_paths.push(rel);
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (out_dir, staged_rel_paths);
+    }
+    Ok(())
 }
 
 /// Assemble a self-contained `guap-portable` folder/USB layout with a cryptographic
@@ -204,6 +243,7 @@ pub fn create_portable_bundle(
                 }
             }
         }
+        stage_windows_vc_runtime_dlls(out_dir, &mut staged_rel_paths)?;
     }
     if let Some(gguf) = gguf_model {
         if !gguf.is_file() {
@@ -353,6 +393,10 @@ mod tests {
         assert!(is_companion_llama_lib("llama-server-impl.dll", false));
         assert!(is_companion_llama_lib("llama.dll", false));
         assert!(is_companion_llama_lib("mtmd.dll", false));
+        assert!(is_companion_llama_lib("vcruntime140.dll", false));
+        assert!(is_companion_llama_lib("vcruntime140_1.dll", false));
+        assert!(is_companion_llama_lib("msvcp140.dll", false));
+        assert!(is_companion_llama_lib("vcomp140.dll", false));
         assert!(!is_companion_llama_lib("llama-bench-impl.dll", false));
         assert!(!is_companion_llama_lib("ggml-cuda.dll", false));
         assert!(is_companion_llama_lib("ggml-cuda.dll", true));
